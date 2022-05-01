@@ -1,0 +1,78 @@
+[tool.poetry]
+name = "amass"
+version = "0.1.1"
+description = "Vendor libraries from cdnjs"
+authors = ["James Meakin <amass@jmsmkn.com>"]
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/jmsmkn/amass"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+]
+
+[tool.poetry.scripts]
+amass = "amass.cli:cli"
+
+[tool.poetry.dependencies]
+python = ">=3.7"
+click = "*"
+aiohttp = "*"
+packaging = "*"
+tomlkit = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "*"
+pytest-randomly = "*"
+pytest-cov = "*"
+pytest-asyncio = "*"
+
+[tool.amass]
+output = "test_output"
+
+[tool.amass.dependencies]
+htmx = { version = "*", include = ["htmx.min.js", "htmx.js"]}
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.isort]
+profile = "black"
+known_first_party = ["amass", "tests"]
+line_length = 79
+
+[tool.black]
+line-length = 79
+target-version = ['py37']
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+minversion = "6.0"
+testpaths = [
+    "tests",
+]
+python_files = "tests.py test_*.py *_tests.py"
+addopts = "--strict-markers --showlocals"
+xfail_strict = true
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+isolated_build = True
+envlist = py37, py38, py39, py310
+[gh-actions]
+python =
+    3.7: py37
+    3.8: py38
+    3.9: py39
+    3.10: py310
+[testenv]
+allowlist_externals =
+    poetry
+setenv =
+    PYTHONPATH = {toxinidir}
+commands =
+    poetry install -v
+    poetry run pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
+"""
