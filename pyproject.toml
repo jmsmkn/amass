@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "amass"
-version = "0.1.1"
+version = "0.1.2"
 description = "Vendor libraries from cdnjs"
 authors = ["James Meakin <amass@jmsmkn.com>"]
 license = "Apache-2.0"
@@ -31,7 +31,7 @@ pytest-asyncio = "*"
 output = "test_output"
 
 [tool.amass.dependencies]
-htmx = { version = "*", include = ["htmx.min.js", "htmx.js"]}
+openseadragon = { version = "==2.4.1", include = ["openseadragon.min.js", "openseadragon.js", "images/*"]}
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

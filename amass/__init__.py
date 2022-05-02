@@ -22,8 +22,8 @@ class AssetFile:
 
     @property
     def relative_path(self) -> Path:
-        library, _, filename = self.name.split("/", 3)
-        return Path(library) / filename
+        library, _, *filename = self.name.split("/")
+        return Path(library, *filename)
 
     async def fetch(
         self,
