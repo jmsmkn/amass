@@ -82,7 +82,8 @@ async def install() -> None:
     lock_file = parse_lock_file(content=content)
 
     with TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
+        tmp_path = Path(tmp_dir) / "output"
+        tmp_path.mkdir()
 
         semaphore = asyncio.Semaphore(value=CONCURRENT_REQUESTS)
         async with aiohttp.ClientSession() as session:
