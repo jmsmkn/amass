@@ -191,11 +191,13 @@ class Dependency:
 
                 self.assets = {}
                 for asset in metadata["assets"]:
+                    version_str = asset["version"]
+
                     try:
-                        version = Version(asset["version"])
+                        version = Version(version_str)
                     except InvalidVersion:
                         warn(
-                            f"Skipping invalid version {version} for {self.name}"
+                            f"Skipping invalid version {version_str} for {self.name}"
                         )
                         continue
 
