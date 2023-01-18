@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "amass"
-version = "0.1.4"
+version = "0.2.0"
 description = "Vendor libraries from cdnjs"
 authors = ["James Meakin <amass@jmsmkn.com>"]
 license = "Apache-2.0"
@@ -60,13 +60,14 @@ xfail_strict = true
 legacy_tox_ini = """
 [tox]
 isolated_build = True
-envlist = py37, py38, py39, py310
+envlist = py37, py38, py39, py310, py311
 [gh-actions]
 python =
     3.7: py37
     3.8: py38
     3.9: py39
     3.10: py310
+    3.11: py311
 [testenv]
 allowlist_externals =
     poetry
