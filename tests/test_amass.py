@@ -9,6 +9,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from amass import (
+    AssetFile,
     Dependency,
     LockedDependency,
     LockFile,
@@ -84,24 +85,40 @@ def semaphore():
 
 
 async def test_update_all_assets(session, semaphore):
-    dependency = Dependency(name="htmx")
+    dependency = Dependency(
+        name="htmx",
+        specifiers=SpecifierSet("==1.7.0"),
+        include_filter={
+            "htmx(.min)?.js",
+        },
+    )
     await dependency.update_assets(
         session=session,
         semaphore=semaphore,
     )
-    assert [*dependency.assets.keys()] == [Version(v) for v in TEST_VERSIONS]
-
-
-def test_resolved_dependency():
-    dependency = Dependency(
-        name="foo", assets={Version(v): [] for v in TEST_VERSIONS}
-    )
     assert dependency.resolved_version == Version("1.7.0")
+    assert dependency.assets == [
+        AssetFile(
+            name="htmx/1.7.0/htmx.js",
+            sri="sha512-wJXYT7RzKp/dxju83CCCATupp32GQvko0KrJVK3zTgTMkVWiLiHnupKKgOUt+87t+oe/Rm2Q2p+pOpiD+IR0lQ==",
+        ),
+        AssetFile(
+            name="htmx/1.7.0/htmx.min.js",
+            sri="sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg==",
+        ),
+    ]
+
+
+def test_resolve_dependency():
+    dependency = Dependency(name="foo")
+    assert dependency.resolve_version(
+        versions={Version(v) for v in TEST_VERSIONS}
+    ) == Version("1.7.0")
 
 
 def test_dependency_to_lock_entry():
     dependency = Dependency(
-        name="foo", assets={Version(v): [] for v in TEST_VERSIONS}
+        name="foo", resolved_version=Version("1.7.0"), assets=[]
     )
     assert dependency.locked == LockedDependency(
         name="foo", version="1.7.0", assets=[]

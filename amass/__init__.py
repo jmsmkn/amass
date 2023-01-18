@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from base64 import b64encode
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Pattern, Set
 from warnings import warn
@@ -27,6 +27,7 @@ class AssetFile:
 
     async def fetch(
         self,
+        *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
     ) -> bytes:
@@ -40,7 +41,7 @@ class AssetFile:
 
         return content
 
-    def check_integrity(self, content: bytes) -> None:
+    def check_integrity(self, *, content: bytes) -> None:
         if self.sri is not None:
             algorithm, hash_b64 = self.sri.split("-", 2)
 
@@ -52,6 +53,7 @@ class AssetFile:
 
     async def download(
         self,
+        *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         output_dir: Path,
@@ -135,7 +137,7 @@ class LockFile:
         ]
         await asyncio.gather(*tasks)
 
-    def check_integrity(self, directory: Path) -> None:
+    def check_integrity(self, *, directory: Path) -> None:
         expected_assets = [
             asset
             for dependency in self.dependencies
@@ -159,40 +161,54 @@ class Dependency:
     name: str
     specifiers: SpecifierSet = SpecifierSet("")
     include_filter: Optional[Set[Pattern[str]]] = None
-    assets: Dict[Version, Iterable[AssetFile]] = field(default_factory=dict)
+    resolved_version: Optional[Version] = None
+    assets: Optional[Iterable[AssetFile]] = None
 
     def __post_init__(self) -> None:
         if self.include_filter is not None:
             self.include_filter = {re.compile(f) for f in self.include_filter}
 
-    @property
-    def resolved_version(self) -> Version:
-        if not self.assets:
-            raise RuntimeError("No assets found")
+    def resolve_version(self, *, versions: Set[Version]) -> Version:
+        if not versions:
+            raise RuntimeError(f"No assets found for {self.name}")
 
-        return max(self.specifiers.filter(iterable=self.assets))
+        return max(self.specifiers.filter(iterable=versions))
 
     @property
     def locked(self) -> LockedDependency:
+        if self.assets is None:
+            raise RuntimeError(f"Assets are not set for {self.name}")
+
+        if self.resolved_version is None:
+            raise RuntimeError(f"The version is not set for {self.name}")
+
         return LockedDependency(
             name=self.name,
             version=str(self.resolved_version),
-            assets=self.assets[self.resolved_version],
+            assets=self.assets,
         )
 
     async def update_assets(
-        self, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
+        self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> None:
+        versions = await self._find_versions(
+            session=session, semaphore=semaphore
+        )
+        self.resolved_version = self.resolve_version(versions=versions)
+        await self._update_assets(session=session, semaphore=semaphore)
+
+    async def _find_versions(
+        self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
+    ) -> Set[Version]:
         async with semaphore:
             async with session.get(
-                f"https://api.cdnjs.com/libraries/{self.name}?fields=assets"
+                f"https://api.cdnjs.com/libraries/{self.name}"
             ) as response:
                 metadata = await response.json()
 
-                self.assets = {}
-                for asset in metadata["assets"]:
-                    version_str = asset["version"]
+                versions = set()
 
+                for version_str in metadata["versions"]:
                     try:
                         version = Version(version_str)
                     except InvalidVersion:
@@ -201,25 +217,38 @@ class Dependency:
                         )
                         continue
 
-                    if self.include_filter is not None:
-                        filenames = [
-                            filename
-                            for filename in asset["files"]
-                            if any(
-                                filter.match(filename)
-                                for filter in self.include_filter
-                            )
-                        ]
-                    else:
-                        filenames = asset["files"]
+                    versions.add(version)
 
-                    self.assets[version] = [
-                        AssetFile(
-                            name=f"{self.name}/{version}/{filename}",
-                            sri=asset["sri"].get(filename),
+                return versions
+
+    async def _update_assets(
+        self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
+    ) -> None:
+        async with semaphore:
+            async with session.get(
+                f"https://api.cdnjs.com/libraries/{self.name}/{self.resolved_version}"
+            ) as response:
+                metadata = await response.json()
+
+                if self.include_filter is not None:
+                    filenames = [
+                        filename
+                        for filename in metadata["files"]
+                        if any(
+                            filter.match(filename)
+                            for filter in self.include_filter
                         )
-                        for filename in filenames
                     ]
+                else:
+                    filenames = metadata["files"]
+
+                self.assets = [
+                    AssetFile(
+                        name=f"{self.name}/{self.resolved_version}/{filename}",
+                        sri=metadata["sri"].get(filename),
+                    )
+                    for filename in filenames
+                ]
 
 
 def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
