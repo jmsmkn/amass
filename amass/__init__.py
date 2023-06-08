@@ -19,6 +19,7 @@ from packaging.version import InvalidVersion, Version
 
 
 class Provider(str, Enum):
+    # Identifier must be the upper case of the value
     CDNJS = "cdnjs"
     UNPKG = "unpkg"
 
@@ -339,15 +340,15 @@ class LockFile:
                     content = f.read()
                     asset.check_integrity(content=content)
 
-        if {f.relative_to(directory) for f in generated_files} != found_files:
+        if generated_files != found_files:
             raise RuntimeError("Sets of files do not match")
 
 
 @dataclass
 class Dependency:
     name: str
+    provider: Provider
     specifiers: SpecifierSet = SpecifierSet("")
-    provider: Provider = Provider.CDNJS
     include_filter: Optional[Set[Pattern[str]]] = None
     resolved_version: Optional[Version] = None
     assets: Optional[Iterable[AssetFile]] = None
@@ -461,11 +462,14 @@ def parse_dependencies(
         if version == "*":
             version = ""
 
+        provider = meta.get("provider", "cdnjs")
+
         parsed.append(
             Dependency(
                 name=name,
                 specifiers=SpecifierSet(version),
                 include_filter=include_filter,
+                provider=Provider[provider.upper()],
             )
         )
 

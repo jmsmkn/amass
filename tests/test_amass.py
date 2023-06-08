@@ -92,6 +92,7 @@ def semaphore():
 async def test_update_all_assets(session, semaphore):
     dependency = Dependency(
         name="htmx",
+        provider=Provider.CDNJS,
         specifiers=SpecifierSet("==1.7.0"),
         include_filter={
             "htmx(.min)?.js",
@@ -115,7 +116,7 @@ async def test_update_all_assets(session, semaphore):
 
 
 def test_resolve_dependency():
-    dependency = Dependency(name="foo")
+    dependency = Dependency(name="foo", provider=Provider.CDNJS)
     assert dependency.resolve_version(
         versions={Version(v) for v in TEST_VERSIONS}
     ) == Version("1.7.0")
@@ -185,6 +186,7 @@ def test_parse_lock_file():
 async def test_generate_lock_file(session, semaphore):
     dependency = Dependency(
         name="htmx",
+        provider=Provider.CDNJS,
         include_filter={"htmx.min.js"},
         specifiers=SpecifierSet("==1.7.0"),
     )
@@ -198,7 +200,7 @@ async def test_generate_lock_file(session, semaphore):
 
 
 async def test_fetch_asset_file(session, semaphore):
-    dependency = Dependency(name="htmx")
+    dependency = Dependency(name="htmx", provider=Provider.CDNJS)
     await dependency.update_assets(session=session, semaphore=semaphore)
     locked_dependency = dependency.locked
 
@@ -235,10 +237,19 @@ async def test_download_lock_file(session, semaphore, tmp_path):
     ]
 
 
-def test_parse_dependencies():
+@pytest.mark.parametrize(
+    "provider_string,expected_provider",
+    (("cdnjs", Provider.CDNJS), ("unpkg", Provider.UNPKG)),
+)
+def test_parse_dependencies(provider_string, expected_provider):
     dependencies = tomlkit.table()
     dependencies.add(
-        "htmx", {"version": "==1.7.0", "include": ["htmx.min.js"]}
+        "htmx",
+        {
+            "version": "==1.7.0",
+            "provider": provider_string,
+            "include": ["htmx.min.js"],
+        },
     )
 
     parsed = parse_dependencies(dependencies=dependencies)
@@ -246,6 +257,7 @@ def test_parse_dependencies():
     assert parsed == [
         Dependency(
             name="htmx",
+            provider=expected_provider,
             specifiers=SpecifierSet("==1.7.0"),
             include_filter={"htmx.min.js"},
         )
