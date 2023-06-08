@@ -3,10 +3,12 @@ import functools
 import hashlib
 import json
 import re
+from abc import ABC, abstractmethod
 from base64 import b64encode
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Pattern, Set
+from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type
 from warnings import warn
 
 import aiohttp
@@ -15,9 +17,15 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 
+class Provider(str, Enum):
+    CDNJS = "cdnjs"
+    UNPKG = "unpkg"
+
+
 @dataclass
 class AssetFile:
     name: str
+    provider: Provider
     sri: Optional[str] = None
 
     @property
@@ -31,10 +39,15 @@ class AssetFile:
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
     ) -> bytes:
+        if self.provider == Provider.CDNJS:
+            location = f"https://cdnjs.cloudflare.com/ajax/libs/{self.name}"
+        elif self.provider == Provider.UNPKG:
+            raise NotImplementedError
+        else:
+            raise RuntimeError(f"Invalid provider: {self.provider}")
+
         async with semaphore:
-            async with session.get(
-                f"https://cdnjs.cloudflare.com/ajax/libs/{self.name}"
-            ) as request:
+            async with session.get(location) as request:
                 content: bytes = await request.read()
 
         self.check_integrity(content=content)
@@ -156,10 +169,110 @@ class LockFile:
                 asset.check_integrity(content=content)
 
 
+class DependencyProvider(ABC):
+    @staticmethod
+    @abstractmethod
+    async def find_versions(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> Set[Version]:
+        ...
+
+    @classmethod
+    @abstractmethod
+    async def get_assets(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        resolved_version: Version,
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable[AssetFile]:
+        ...
+
+    @staticmethod
+    def filter_filenames(
+        *,
+        filenames: Iterable[str],
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable[str]:
+        if include_filter is not None:
+            return [
+                filename
+                for filename in filenames
+                if any(fltr.match(filename) for fltr in include_filter)
+            ]
+        else:
+            return filenames
+
+
+class CDNJSDependencyProvider(DependencyProvider):
+    @staticmethod
+    async def find_versions(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> Set[Version]:
+        async with semaphore:
+            async with session.get(
+                f"https://api.cdnjs.com/libraries/{name}"
+            ) as response:
+                metadata = await response.json()
+
+                versions = set()
+
+                for version_str in metadata["versions"]:
+                    try:
+                        version = Version(version_str)
+                    except InvalidVersion:
+                        warn(
+                            f"Skipping invalid version {version_str} for {name}"
+                        )
+                        continue
+
+                    versions.add(version)
+
+                return versions
+
+    @classmethod
+    async def get_assets(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        resolved_version: Version,
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable[AssetFile]:
+        async with semaphore:
+            async with session.get(
+                f"https://api.cdnjs.com/libraries/{name}/{resolved_version}"
+            ) as response:
+                metadata = await response.json()
+
+                filenames = cls.filter_filenames(
+                    filenames=metadata["files"], include_filter=include_filter
+                )
+
+                return [
+                    AssetFile(
+                        name=f"{name}/{resolved_version}/{filename}",
+                        sri=metadata["sri"].get(filename),
+                        provider=Provider.CDNJS,
+                    )
+                    for filename in filenames
+                ]
+
+
 @dataclass
 class Dependency:
     name: str
     specifiers: SpecifierSet = SpecifierSet("")
+    provider: Provider = Provider.CDNJS
     include_filter: Optional[Set[Pattern[str]]] = None
     resolved_version: Optional[Version] = None
     assets: Optional[Iterable[AssetFile]] = None
@@ -188,6 +301,15 @@ class Dependency:
             assets=self.assets,
         )
 
+    @property
+    def dependency_provider(self) -> Type[DependencyProvider]:
+        if self.provider == Provider.CDNJS:
+            return CDNJSDependencyProvider
+        elif self.provider == Provider.UNPKG:
+            raise NotImplementedError
+        else:
+            raise RuntimeError(f"Invalid provider: {self.provider}")
+
     async def update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> None:
@@ -200,55 +322,20 @@ class Dependency:
     async def _find_versions(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> Set[Version]:
-        async with semaphore:
-            async with session.get(
-                f"https://api.cdnjs.com/libraries/{self.name}"
-            ) as response:
-                metadata = await response.json()
-
-                versions = set()
-
-                for version_str in metadata["versions"]:
-                    try:
-                        version = Version(version_str)
-                    except InvalidVersion:
-                        warn(
-                            f"Skipping invalid version {version_str} for {self.name}"
-                        )
-                        continue
-
-                    versions.add(version)
-
-                return versions
+        return await self.dependency_provider.find_versions(
+            session=session, semaphore=semaphore, name=self.name
+        )
 
     async def _update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> None:
-        async with semaphore:
-            async with session.get(
-                f"https://api.cdnjs.com/libraries/{self.name}/{self.resolved_version}"
-            ) as response:
-                metadata = await response.json()
-
-                if self.include_filter is not None:
-                    filenames = [
-                        filename
-                        for filename in metadata["files"]
-                        if any(
-                            filter.match(filename)
-                            for filter in self.include_filter
-                        )
-                    ]
-                else:
-                    filenames = metadata["files"]
-
-                self.assets = [
-                    AssetFile(
-                        name=f"{self.name}/{self.resolved_version}/{filename}",
-                        sri=metadata["sri"].get(filename),
-                    )
-                    for filename in filenames
-                ]
+        self.assets = await self.dependency_provider.get_assets(
+            session=session,
+            semaphore=semaphore,
+            name=self.name,
+            resolved_version=self.resolved_version,
+            include_filter=self.include_filter,
+        )
 
 
 def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:

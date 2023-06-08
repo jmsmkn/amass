@@ -13,6 +13,7 @@ from amass import (
     Dependency,
     LockedDependency,
     LockFile,
+    Provider,
     generate_lock_file,
     parse_dependencies,
     parse_lock_file,
@@ -47,13 +48,14 @@ TEST_VERSIONS = [
 ]
 TEST_LOCK_FILE = {
     "content_hash": (
-        "sha256:5d4ba078d04b5074350c8d2bedcdc7d72023c608c250ebbb767a9b2ae60f424b"
+        "sha256:c1b379ea1edcac14de336561dae63edd0e4cf12fdd0b8d497c3c4e84ac33e70c"
     ),
     "dependencies": [
         {
             "assets": [
                 {
                     "name": "htmx/1.7.0/htmx.min.js",
+                    "provider": "cdnjs",
                     "sri": (
                         "sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg=="
                     ),
@@ -101,10 +103,12 @@ async def test_update_all_assets(session, semaphore):
         AssetFile(
             name="htmx/1.7.0/htmx.js",
             sri="sha512-wJXYT7RzKp/dxju83CCCATupp32GQvko0KrJVK3zTgTMkVWiLiHnupKKgOUt+87t+oe/Rm2Q2p+pOpiD+IR0lQ==",
+            provider=Provider.CDNJS,
         ),
         AssetFile(
             name="htmx/1.7.0/htmx.min.js",
             sri="sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg==",
+            provider=Provider.CDNJS,
         ),
     ]
 
