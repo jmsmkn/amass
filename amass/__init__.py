@@ -22,37 +22,155 @@ class Provider(str, Enum):
     UNPKG = "unpkg"
 
 
+class DependencyProvider(ABC):
+    @classmethod
+    @abstractmethod
+    async def find_versions(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> Set[Version]:
+        ...
+
+    @classmethod
+    @abstractmethod
+    async def get_assets(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        resolved_version: Version,
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable["AssetFile"]:
+        ...
+
+    @staticmethod
+    @abstractmethod
+    async def fetch_file(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> bytes:
+        ...
+
+    @staticmethod
+    def clean_versions(*, version_strs: Iterable[str]) -> Set[Version]:
+        versions = set()
+
+        for version_str in version_strs:
+            try:
+                version = Version(version_str)
+            except InvalidVersion:
+                warn(f"Skipping invalid version {version_str}")
+                continue
+
+            versions.add(version)
+
+        return versions
+
+    @staticmethod
+    def filter_filenames(
+        *,
+        filenames: Iterable[str],
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable[str]:
+        if include_filter is not None:
+            return [
+                filename
+                for filename in filenames
+                if any(fltr.match(filename) for fltr in include_filter)
+            ]
+        else:
+            return filenames
+
+
+class CDNJSDependencyProvider(DependencyProvider):
+    @classmethod
+    async def find_versions(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> Set[Version]:
+        async with semaphore:
+            async with session.get(
+                f"https://api.cdnjs.com/libraries/{name}"
+            ) as response:
+                metadata = await response.json()
+
+                versions = cls.clean_versions(
+                    version_strs=metadata["versions"]
+                )
+
+                return versions
+
+    @classmethod
+    async def get_assets(
+        cls,
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        resolved_version: Version,
+        include_filter: Optional[Set[Pattern[str]]],
+    ) -> Iterable["AssetFile"]:
+        async with semaphore:
+            async with session.get(
+                f"https://api.cdnjs.com/libraries/{name}/{resolved_version}"
+            ) as response:
+                metadata = await response.json()
+
+                filenames = cls.filter_filenames(
+                    filenames=metadata["files"], include_filter=include_filter
+                )
+
+                return [
+                    AssetFile(
+                        name=f"{name}/{resolved_version}/{filename}",
+                        sri=metadata["sri"].get(filename),
+                    )
+                    for filename in filenames
+                ]
+
+    @staticmethod
+    async def fetch_file(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> bytes:
+        async with semaphore:
+            async with session.get(
+                f"https://cdnjs.cloudflare.com/ajax/libs/{name}"
+            ) as request:
+                content: bytes = await request.read()
+
+        return content
+
+
+def get_dependency_provider(*, provider: Provider) -> Type[DependencyProvider]:
+    if provider == Provider.CDNJS:
+        return CDNJSDependencyProvider
+    elif provider == Provider.UNPKG:
+        raise NotImplementedError
+    else:
+        raise RuntimeError(f"Invalid provider: {provider}")
+
+
 @dataclass
 class AssetFile:
     name: str
-    provider: Provider
     sri: Optional[str] = None
 
     @property
     def relative_path(self) -> Path:
         library, _, *filename = self.name.split("/")
         return Path(library, *filename)
-
-    async def fetch(
-        self,
-        *,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-    ) -> bytes:
-        if self.provider == Provider.CDNJS:
-            location = f"https://cdnjs.cloudflare.com/ajax/libs/{self.name}"
-        elif self.provider == Provider.UNPKG:
-            raise NotImplementedError
-        else:
-            raise RuntimeError(f"Invalid provider: {self.provider}")
-
-        async with semaphore:
-            async with session.get(location) as request:
-                content: bytes = await request.read()
-
-        self.check_integrity(content=content)
-
-        return content
 
     def check_integrity(self, *, content: bytes) -> None:
         if self.sri is not None:
@@ -70,8 +188,13 @@ class AssetFile:
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         output_dir: Path,
+        dependency_provider: Type[DependencyProvider],
     ) -> None:
-        content = await self.fetch(session=session, semaphore=semaphore)
+        content = await dependency_provider.fetch_file(
+            session=session, semaphore=semaphore, name=self.name
+        )
+
+        self.check_integrity(content=content)
 
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
@@ -95,6 +218,7 @@ class AssetFile:
 class LockedDependency:
     name: str
     version: str
+    provider: Provider
     assets: Iterable[AssetFile]
 
     def __post_init__(self) -> None:
@@ -143,7 +267,12 @@ class LockFile:
     ) -> None:
         tasks = [
             asset.download(
-                session=session, semaphore=semaphore, output_dir=output_dir
+                session=session,
+                semaphore=semaphore,
+                output_dir=output_dir,
+                dependency_provider=get_dependency_provider(
+                    provider=dependency.provider
+                ),
             )
             for dependency in self.dependencies
             for asset in dependency.assets
@@ -167,105 +296,6 @@ class LockFile:
             with open(directory / asset.relative_path, "rb") as f:
                 content = f.read()
                 asset.check_integrity(content=content)
-
-
-class DependencyProvider(ABC):
-    @staticmethod
-    @abstractmethod
-    async def find_versions(
-        *,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-        name: str,
-    ) -> Set[Version]:
-        ...
-
-    @classmethod
-    @abstractmethod
-    async def get_assets(
-        cls,
-        *,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-        name: str,
-        resolved_version: Version,
-        include_filter: Optional[Set[Pattern[str]]],
-    ) -> Iterable[AssetFile]:
-        ...
-
-    @staticmethod
-    def filter_filenames(
-        *,
-        filenames: Iterable[str],
-        include_filter: Optional[Set[Pattern[str]]],
-    ) -> Iterable[str]:
-        if include_filter is not None:
-            return [
-                filename
-                for filename in filenames
-                if any(fltr.match(filename) for fltr in include_filter)
-            ]
-        else:
-            return filenames
-
-
-class CDNJSDependencyProvider(DependencyProvider):
-    @staticmethod
-    async def find_versions(
-        *,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-        name: str,
-    ) -> Set[Version]:
-        async with semaphore:
-            async with session.get(
-                f"https://api.cdnjs.com/libraries/{name}"
-            ) as response:
-                metadata = await response.json()
-
-                versions = set()
-
-                for version_str in metadata["versions"]:
-                    try:
-                        version = Version(version_str)
-                    except InvalidVersion:
-                        warn(
-                            f"Skipping invalid version {version_str} for {name}"
-                        )
-                        continue
-
-                    versions.add(version)
-
-                return versions
-
-    @classmethod
-    async def get_assets(
-        cls,
-        *,
-        session: aiohttp.ClientSession,
-        semaphore: asyncio.Semaphore,
-        name: str,
-        resolved_version: Version,
-        include_filter: Optional[Set[Pattern[str]]],
-    ) -> Iterable[AssetFile]:
-        async with semaphore:
-            async with session.get(
-                f"https://api.cdnjs.com/libraries/{name}/{resolved_version}"
-            ) as response:
-                metadata = await response.json()
-
-                filenames = cls.filter_filenames(
-                    filenames=metadata["files"], include_filter=include_filter
-                )
-
-                return [
-                    AssetFile(
-                        name=f"{name}/{resolved_version}/{filename}",
-                        sri=metadata["sri"].get(filename),
-                        provider=Provider.CDNJS,
-                    )
-                    for filename in filenames
-                ]
 
 
 @dataclass
@@ -298,17 +328,9 @@ class Dependency:
         return LockedDependency(
             name=self.name,
             version=str(self.resolved_version),
+            provider=self.provider,
             assets=self.assets,
         )
-
-    @property
-    def dependency_provider(self) -> Type[DependencyProvider]:
-        if self.provider == Provider.CDNJS:
-            return CDNJSDependencyProvider
-        elif self.provider == Provider.UNPKG:
-            raise NotImplementedError
-        else:
-            raise RuntimeError(f"Invalid provider: {self.provider}")
 
     async def update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
@@ -322,14 +344,16 @@ class Dependency:
     async def _find_versions(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> Set[Version]:
-        return await self.dependency_provider.find_versions(
-            session=session, semaphore=semaphore, name=self.name
-        )
+        return await get_dependency_provider(
+            provider=self.provider
+        ).find_versions(session=session, semaphore=semaphore, name=self.name)
 
     async def _update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> None:
-        self.assets = await self.dependency_provider.get_assets(
+        self.assets = await get_dependency_provider(
+            provider=self.provider
+        ).get_assets(
             session=session,
             semaphore=semaphore,
             name=self.name,

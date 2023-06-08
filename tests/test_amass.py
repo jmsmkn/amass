@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import aiohttp
 import pytest
@@ -15,6 +17,7 @@ from amass import (
     LockFile,
     Provider,
     generate_lock_file,
+    get_dependency_provider,
     parse_dependencies,
     parse_lock_file,
 )
@@ -48,14 +51,13 @@ TEST_VERSIONS = [
 ]
 TEST_LOCK_FILE = {
     "content_hash": (
-        "sha256:c1b379ea1edcac14de336561dae63edd0e4cf12fdd0b8d497c3c4e84ac33e70c"
+        "sha256:678932eba1a8374f9e4d5172bef045e37e1246147882b0a8010f2a33ba53a1da"
     ),
     "dependencies": [
         {
             "assets": [
                 {
                     "name": "htmx/1.7.0/htmx.min.js",
-                    "provider": "cdnjs",
                     "sri": (
                         "sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg=="
                     ),
@@ -63,6 +65,7 @@ TEST_LOCK_FILE = {
             ],
             "name": "htmx",
             "version": "1.7.0",
+            "provider": "cdnjs",
         }
     ],
     "lock_version": "1.0",
@@ -103,12 +106,10 @@ async def test_update_all_assets(session, semaphore):
         AssetFile(
             name="htmx/1.7.0/htmx.js",
             sri="sha512-wJXYT7RzKp/dxju83CCCATupp32GQvko0KrJVK3zTgTMkVWiLiHnupKKgOUt+87t+oe/Rm2Q2p+pOpiD+IR0lQ==",
-            provider=Provider.CDNJS,
         ),
         AssetFile(
             name="htmx/1.7.0/htmx.min.js",
             sri="sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg==",
-            provider=Provider.CDNJS,
         ),
     ]
 
@@ -122,23 +123,37 @@ def test_resolve_dependency():
 
 def test_dependency_to_lock_entry():
     dependency = Dependency(
-        name="foo", resolved_version=Version("1.7.0"), assets=[]
+        name="foo",
+        resolved_version=Version("1.7.0"),
+        assets=[],
+        provider=Provider.CDNJS,
     )
     assert dependency.locked == LockedDependency(
-        name="foo", version="1.7.0", assets=[]
+        name="foo", version="1.7.0", assets=[], provider=Provider.CDNJS
     )
 
 
 def test_lock_file_content():
     lock_file = LockFile(
-        dependencies=[LockedDependency(name="foo", version="3.6.0", assets=[])]
+        dependencies=[
+            LockedDependency(
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+            )
+        ]
     )
     assert lock_file.content == {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:0da56b8294e236b39325c8197c90735c9dbb6af38afe891389cd3b94a3d3143c"
+            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
         ),
-        "dependencies": [{"name": "foo", "version": "3.6.0", "assets": []}],
+        "dependencies": [
+            {
+                "name": "foo",
+                "version": "3.6.0",
+                "assets": [],
+                "provider": "cdnjs",
+            }
+        ],
     }
 
 
@@ -146,13 +161,24 @@ def test_parse_lock_file():
     content = {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:0da56b8294e236b39325c8197c90735c9dbb6af38afe891389cd3b94a3d3143c"
+            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
         ),
-        "dependencies": [{"name": "foo", "version": "3.6.0", "assets": []}],
+        "dependencies": [
+            {
+                "name": "foo",
+                "version": "3.6.0",
+                "assets": [],
+                "provider": "cdnjs",
+            }
+        ],
     }
 
     assert parse_lock_file(content=content) == LockFile(
-        dependencies=[LockedDependency(name="foo", version="3.6.0", assets=[])]
+        dependencies=[
+            LockedDependency(
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+            )
+        ]
     )
 
 
@@ -176,11 +202,22 @@ async def test_fetch_asset_file(session, semaphore):
     await dependency.update_assets(session=session, semaphore=semaphore)
     locked_dependency = dependency.locked
 
-    content = await locked_dependency.assets[0].fetch(
-        session=session, semaphore=semaphore
-    )
+    with TemporaryDirectory() as dir:
+        output_path = Path(dir)
+        asset = locked_dependency.assets[0]
+        await asset.download(
+            session=session,
+            semaphore=semaphore,
+            output_dir=output_path,
+            dependency_provider=get_dependency_provider(
+                provider=dependency.provider
+            ),
+        )
 
-    assert content != b""
+        with open(output_path / asset.relative_path) as f:
+            content = f.read()
+
+    assert content != ""
 
 
 async def test_download_lock_file(session, semaphore, tmp_path):
