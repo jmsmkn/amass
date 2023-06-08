@@ -51,13 +51,13 @@ TEST_VERSIONS = [
 ]
 TEST_LOCK_FILE = {
     "content_hash": (
-        "sha256:678932eba1a8374f9e4d5172bef045e37e1246147882b0a8010f2a33ba53a1da"
+        "sha256:ad85f173abc4da1023762546637c542ad6c23ef14edf0ecdfb8751d589db9279"
     ),
     "dependencies": [
         {
             "assets": [
                 {
-                    "name": "htmx/1.7.0/htmx.min.js",
+                    "name": "htmx.min.js",
                     "sri": (
                         "sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg=="
                     ),
@@ -104,11 +104,11 @@ async def test_update_all_assets(session, semaphore):
     assert dependency.resolved_version == Version("1.7.0")
     assert dependency.assets == [
         AssetFile(
-            name="htmx/1.7.0/htmx.js",
+            name="htmx.js",
             sri="sha512-wJXYT7RzKp/dxju83CCCATupp32GQvko0KrJVK3zTgTMkVWiLiHnupKKgOUt+87t+oe/Rm2Q2p+pOpiD+IR0lQ==",
         ),
         AssetFile(
-            name="htmx/1.7.0/htmx.min.js",
+            name="htmx.min.js",
             sri="sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg==",
         ),
     ]
@@ -212,9 +212,11 @@ async def test_fetch_asset_file(session, semaphore):
             dependency_provider=get_dependency_provider(
                 provider=dependency.provider
             ),
+            dependency_name=dependency.name,
+            dependency_version=dependency.resolved_version,
         )
 
-        with open(output_path / asset.relative_path) as f:
+        with open(output_path / dependency.name / asset.name) as f:
             content = f.read()
 
     assert content != ""

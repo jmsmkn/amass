@@ -8,7 +8,7 @@ from base64 import b64encode
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type
+from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type, Union
 from warnings import warn
 
 import aiohttp
@@ -41,8 +41,7 @@ class DependencyProvider(ABC):
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
-        resolved_version: Version,
-        include_filter: Optional[Set[Pattern[str]]],
+        version: Version,
     ) -> Iterable["AssetFile"]:
         ...
 
@@ -53,23 +52,10 @@ class DependencyProvider(ABC):
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
+        dependency_name: str,
+        dependency_version: Version,
     ) -> bytes:
         ...
-
-    @staticmethod
-    def filter_filenames(
-        *,
-        filenames: Iterable[str],
-        include_filter: Optional[Set[Pattern[str]]],
-    ) -> Iterable[str]:
-        if include_filter is not None:
-            return [
-                filename
-                for filename in filenames
-                if any(fltr.match(filename) for fltr in include_filter)
-            ]
-        else:
-            return filenames
 
 
 class CDNJSDependencyProvider(DependencyProvider):
@@ -86,7 +72,9 @@ class CDNJSDependencyProvider(DependencyProvider):
             ) as response:
                 metadata = await response.json()
 
-        return metadata["versions"]
+        versions: Iterable[str] = metadata["versions"]
+
+        return versions
 
     @classmethod
     async def get_assets(
@@ -95,26 +83,18 @@ class CDNJSDependencyProvider(DependencyProvider):
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
-        resolved_version: Version,
-        include_filter: Optional[Set[Pattern[str]]],
+        version: Version,
     ) -> Iterable["AssetFile"]:
         async with semaphore:
             async with session.get(
-                f"https://api.cdnjs.com/libraries/{name}/{resolved_version}"
+                f"https://api.cdnjs.com/libraries/{name}/{version}"
             ) as response:
                 metadata = await response.json()
 
-                filenames = cls.filter_filenames(
-                    filenames=metadata["files"], include_filter=include_filter
-                )
-
-                return [
-                    AssetFile(
-                        name=f"{name}/{resolved_version}/{filename}",
-                        sri=metadata["sri"].get(filename),
-                    )
-                    for filename in filenames
-                ]
+        return [
+            AssetFile(name=name, sri=metadata["sri"].get(name))
+            for name in metadata["files"]
+        ]
 
     @staticmethod
     async def fetch_file(
@@ -122,10 +102,12 @@ class CDNJSDependencyProvider(DependencyProvider):
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
+        dependency_name: str,
+        dependency_version: Version,
     ) -> bytes:
         async with semaphore:
             async with session.get(
-                f"https://cdnjs.cloudflare.com/ajax/libs/{name}"
+                f"https://cdnjs.cloudflare.com/ajax/libs/{dependency_name}/{dependency_version}/{name}"
             ) as request:
                 content: bytes = await request.read()
 
@@ -146,11 +128,6 @@ class AssetFile:
     name: str
     sri: Optional[str] = None
 
-    @property
-    def relative_path(self) -> Path:
-        library, _, *filename = self.name.split("/")
-        return Path(library, *filename)
-
     def check_integrity(self, *, content: bytes) -> None:
         if self.sri is not None:
             algorithm, hash_b64 = self.sri.split("-", 2)
@@ -168,9 +145,15 @@ class AssetFile:
         semaphore: asyncio.Semaphore,
         output_dir: Path,
         dependency_provider: Type[DependencyProvider],
+        dependency_name: str,
+        dependency_version: Union[Version, str],
     ) -> None:
         content = await dependency_provider.fetch_file(
-            session=session, semaphore=semaphore, name=self.name
+            session=session,
+            semaphore=semaphore,
+            name=self.name,
+            dependency_name=dependency_name,
+            dependency_version=dependency_version,
         )
 
         self.check_integrity(content=content)
@@ -180,16 +163,15 @@ class AssetFile:
             executor=None,
             func=functools.partial(
                 self.save_asset,
-                output_dir=output_dir,
+                output=output_dir / dependency_name / self.name,
                 content=content,
             ),
         )
 
-    def save_asset(self, *, output_dir: Path, content: bytes) -> None:
-        output_file = output_dir / self.relative_path
-        output_file.parent.mkdir(exist_ok=True, parents=True)
+    def save_asset(self, *, output: Path, content: bytes) -> None:
+        output.parent.mkdir(exist_ok=True, parents=True)
 
-        with output_file.open("wb") as f:
+        with output.open("wb") as f:
             f.write(content)
 
 
@@ -252,6 +234,8 @@ class LockFile:
                 dependency_provider=get_dependency_provider(
                     provider=dependency.provider
                 ),
+                dependency_name=dependency.name,
+                dependency_version=dependency.version,
             )
             for dependency in self.dependencies
             for asset in dependency.assets
@@ -259,22 +243,20 @@ class LockFile:
         await asyncio.gather(*tasks)
 
     def check_integrity(self, *, directory: Path) -> None:
-        expected_assets = [
-            asset
-            for dependency in self.dependencies
-            for asset in dependency.assets
-        ]
         generated_files = {f for f in directory.rglob("*") if f.is_file()}
 
-        if {f.relative_to(directory) for f in generated_files} != {
-            a.relative_path for a in expected_assets
-        }:
-            raise RuntimeError("Sets of files do not match")
+        found_files = set()
 
-        for asset in expected_assets:
-            with open(directory / asset.relative_path, "rb") as f:
-                content = f.read()
-                asset.check_integrity(content=content)
+        for dependency in self.dependencies:
+            for asset in dependency.assets:
+                file = directory / dependency.name / asset.name
+                found_files.add(file)
+                with open(file, "rb") as f:
+                    content = f.read()
+                    asset.check_integrity(content=content)
+
+        if {f.relative_to(directory) for f in generated_files} != found_files:
+            raise RuntimeError("Sets of files do not match")
 
 
 @dataclass
@@ -343,15 +325,23 @@ class Dependency:
     async def _update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> None:
-        self.assets = await get_dependency_provider(
+        assets = await get_dependency_provider(
             provider=self.provider
         ).get_assets(
             session=session,
             semaphore=semaphore,
             name=self.name,
-            resolved_version=self.resolved_version,
-            include_filter=self.include_filter,
+            version=self.resolved_version,
         )
+
+        if self.include_filter is not None:
+            assets = [
+                asset
+                for asset in assets
+                if any(fltr.match(asset.name) for fltr in self.include_filter)
+            ]
+
+        self.assets = assets
 
 
 def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
