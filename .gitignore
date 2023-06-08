@@ -133,3 +133,5 @@ poetry.lock
 
 # Amass lock file
 amass.lock
+
+.idea/

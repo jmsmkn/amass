@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import aiohttp
 import pytest
@@ -13,7 +15,9 @@ from amass import (
     Dependency,
     LockedDependency,
     LockFile,
+    Provider,
     generate_lock_file,
+    get_dependency_provider,
     parse_dependencies,
     parse_lock_file,
 )
@@ -47,13 +51,13 @@ TEST_VERSIONS = [
 ]
 TEST_LOCK_FILE = {
     "content_hash": (
-        "sha256:5d4ba078d04b5074350c8d2bedcdc7d72023c608c250ebbb767a9b2ae60f424b"
+        "sha256:ad85f173abc4da1023762546637c542ad6c23ef14edf0ecdfb8751d589db9279"
     ),
     "dependencies": [
         {
             "assets": [
                 {
-                    "name": "htmx/1.7.0/htmx.min.js",
+                    "name": "htmx.min.js",
                     "sri": (
                         "sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg=="
                     ),
@@ -61,6 +65,7 @@ TEST_LOCK_FILE = {
             ],
             "name": "htmx",
             "version": "1.7.0",
+            "provider": "cdnjs",
         }
     ],
     "lock_version": "1.0",
@@ -87,6 +92,7 @@ def semaphore():
 async def test_update_all_assets(session, semaphore):
     dependency = Dependency(
         name="htmx",
+        provider=Provider.CDNJS,
         specifiers=SpecifierSet("==1.7.0"),
         include_filter={
             "htmx(.min)?.js",
@@ -99,18 +105,18 @@ async def test_update_all_assets(session, semaphore):
     assert dependency.resolved_version == Version("1.7.0")
     assert dependency.assets == [
         AssetFile(
-            name="htmx/1.7.0/htmx.js",
+            name="htmx.js",
             sri="sha512-wJXYT7RzKp/dxju83CCCATupp32GQvko0KrJVK3zTgTMkVWiLiHnupKKgOUt+87t+oe/Rm2Q2p+pOpiD+IR0lQ==",
         ),
         AssetFile(
-            name="htmx/1.7.0/htmx.min.js",
+            name="htmx.min.js",
             sri="sha512-etqA0KankuxrlSeZDYycQBY/D/KWZn0YZjlsjAo7kCEBTy1gg+DwmR6icxtOpqDBOzm2P00/lSIXEu7K+zvNsg==",
         ),
     ]
 
 
 def test_resolve_dependency():
-    dependency = Dependency(name="foo")
+    dependency = Dependency(name="foo", provider=Provider.CDNJS)
     assert dependency.resolve_version(
         versions={Version(v) for v in TEST_VERSIONS}
     ) == Version("1.7.0")
@@ -118,23 +124,37 @@ def test_resolve_dependency():
 
 def test_dependency_to_lock_entry():
     dependency = Dependency(
-        name="foo", resolved_version=Version("1.7.0"), assets=[]
+        name="foo",
+        resolved_version=Version("1.7.0"),
+        assets=[],
+        provider=Provider.CDNJS,
     )
     assert dependency.locked == LockedDependency(
-        name="foo", version="1.7.0", assets=[]
+        name="foo", version="1.7.0", assets=[], provider=Provider.CDNJS
     )
 
 
 def test_lock_file_content():
     lock_file = LockFile(
-        dependencies=[LockedDependency(name="foo", version="3.6.0", assets=[])]
+        dependencies=[
+            LockedDependency(
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+            )
+        ]
     )
     assert lock_file.content == {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:0da56b8294e236b39325c8197c90735c9dbb6af38afe891389cd3b94a3d3143c"
+            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
         ),
-        "dependencies": [{"name": "foo", "version": "3.6.0", "assets": []}],
+        "dependencies": [
+            {
+                "name": "foo",
+                "version": "3.6.0",
+                "assets": [],
+                "provider": "cdnjs",
+            }
+        ],
     }
 
 
@@ -142,19 +162,31 @@ def test_parse_lock_file():
     content = {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:0da56b8294e236b39325c8197c90735c9dbb6af38afe891389cd3b94a3d3143c"
+            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
         ),
-        "dependencies": [{"name": "foo", "version": "3.6.0", "assets": []}],
+        "dependencies": [
+            {
+                "name": "foo",
+                "version": "3.6.0",
+                "assets": [],
+                "provider": "cdnjs",
+            }
+        ],
     }
 
     assert parse_lock_file(content=content) == LockFile(
-        dependencies=[LockedDependency(name="foo", version="3.6.0", assets=[])]
+        dependencies=[
+            LockedDependency(
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+            )
+        ]
     )
 
 
 async def test_generate_lock_file(session, semaphore):
     dependency = Dependency(
         name="htmx",
+        provider=Provider.CDNJS,
         include_filter={"htmx.min.js"},
         specifiers=SpecifierSet("==1.7.0"),
     )
@@ -168,15 +200,28 @@ async def test_generate_lock_file(session, semaphore):
 
 
 async def test_fetch_asset_file(session, semaphore):
-    dependency = Dependency(name="htmx")
+    dependency = Dependency(name="htmx", provider=Provider.CDNJS)
     await dependency.update_assets(session=session, semaphore=semaphore)
     locked_dependency = dependency.locked
 
-    content = await locked_dependency.assets[0].fetch(
-        session=session, semaphore=semaphore
-    )
+    with TemporaryDirectory() as dir:
+        output_path = Path(dir)
+        asset = locked_dependency.assets[0]
+        await asset.download(
+            session=session,
+            semaphore=semaphore,
+            output_dir=output_path,
+            dependency_provider=get_dependency_provider(
+                provider=dependency.provider
+            ),
+            dependency_name=dependency.name,
+            dependency_version=dependency.resolved_version,
+        )
 
-    assert content != b""
+        with open(output_path / dependency.name / asset.name) as f:
+            content = f.read()
+
+    assert content != ""
 
 
 async def test_download_lock_file(session, semaphore, tmp_path):
@@ -192,10 +237,19 @@ async def test_download_lock_file(session, semaphore, tmp_path):
     ]
 
 
-def test_parse_dependencies():
+@pytest.mark.parametrize(
+    "provider_string,expected_provider",
+    (("cdnjs", Provider.CDNJS), ("unpkg", Provider.UNPKG)),
+)
+def test_parse_dependencies(provider_string, expected_provider):
     dependencies = tomlkit.table()
     dependencies.add(
-        "htmx", {"version": "==1.7.0", "include": ["htmx.min.js"]}
+        "htmx",
+        {
+            "version": "==1.7.0",
+            "provider": provider_string,
+            "include": ["htmx.min.js"],
+        },
     )
 
     parsed = parse_dependencies(dependencies=dependencies)
@@ -203,7 +257,50 @@ def test_parse_dependencies():
     assert parsed == [
         Dependency(
             name="htmx",
+            provider=expected_provider,
             specifiers=SpecifierSet("==1.7.0"),
             include_filter={"htmx.min.js"},
         )
     ]
+
+
+@pytest.mark.parametrize("provider", (Provider.CDNJS, Provider.UNPKG))
+async def test_dependency_provider_get_versions(session, semaphore, provider):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    versions = await dependency_provider.get_versions(
+        session=session, semaphore=semaphore, name="jquery"
+    )
+
+    assert "3.7.0" in versions
+    assert len(versions) > 10
+
+
+@pytest.mark.parametrize("provider", (Provider.CDNJS, Provider.UNPKG))
+async def test_dependency_provider_get_assets(session, semaphore, provider):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    assets = await dependency_provider.get_assets(
+        session=session, semaphore=semaphore, name="jquery", version="3.7.0"
+    )
+
+    assert len(assets) > 5
+
+
+@pytest.mark.parametrize(
+    "provider,prefix", ((Provider.CDNJS, ""), (Provider.UNPKG, "dist/"))
+)
+async def test_dependency_provider_fetch_file(
+    session, semaphore, provider, prefix
+):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    content = await dependency_provider.fetch_file(
+        session=session,
+        semaphore=semaphore,
+        name=f"{prefix}jquery.min.js",
+        dependency_name="jquery",
+        dependency_version="3.7.0",
+    )
+
+    assert content.decode().startswith("/*! jQuery v3.7.0 |")
