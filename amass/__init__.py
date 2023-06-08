@@ -23,15 +23,14 @@ class Provider(str, Enum):
 
 
 class DependencyProvider(ABC):
-    @classmethod
+    @staticmethod
     @abstractmethod
-    async def find_versions(
-        cls,
+    async def get_versions(
         *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
-    ) -> Set[Version]:
+    ) -> Iterable[str]:
         ...
 
     @classmethod
@@ -58,21 +57,6 @@ class DependencyProvider(ABC):
         ...
 
     @staticmethod
-    def clean_versions(*, version_strs: Iterable[str]) -> Set[Version]:
-        versions = set()
-
-        for version_str in version_strs:
-            try:
-                version = Version(version_str)
-            except InvalidVersion:
-                warn(f"Skipping invalid version {version_str}")
-                continue
-
-            versions.add(version)
-
-        return versions
-
-    @staticmethod
     def filter_filenames(
         *,
         filenames: Iterable[str],
@@ -89,25 +73,20 @@ class DependencyProvider(ABC):
 
 
 class CDNJSDependencyProvider(DependencyProvider):
-    @classmethod
-    async def find_versions(
-        cls,
+    @staticmethod
+    async def get_versions(
         *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         name: str,
-    ) -> Set[Version]:
+    ) -> Iterable[str]:
         async with semaphore:
             async with session.get(
                 f"https://api.cdnjs.com/libraries/{name}"
             ) as response:
                 metadata = await response.json()
 
-                versions = cls.clean_versions(
-                    version_strs=metadata["versions"]
-                )
-
-                return versions
+        return metadata["versions"]
 
     @classmethod
     async def get_assets(
@@ -344,9 +323,22 @@ class Dependency:
     async def _find_versions(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
     ) -> Set[Version]:
-        return await get_dependency_provider(
+        version_strs = await get_dependency_provider(
             provider=self.provider
-        ).find_versions(session=session, semaphore=semaphore, name=self.name)
+        ).get_versions(session=session, semaphore=semaphore, name=self.name)
+
+        versions = set()
+
+        for version_str in version_strs:
+            try:
+                version = Version(version_str)
+            except InvalidVersion:
+                warn(f"Skipping invalid version {version_str} for {self.name}")
+                continue
+
+            versions.add(version)
+
+        return versions
 
     async def _update_assets(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
