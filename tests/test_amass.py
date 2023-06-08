@@ -250,3 +250,45 @@ def test_parse_dependencies():
             include_filter={"htmx.min.js"},
         )
     ]
+
+
+@pytest.mark.parametrize("provider", (Provider.CDNJS, Provider.UNPKG))
+async def test_dependency_provider_get_versions(session, semaphore, provider):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    versions = await dependency_provider.get_versions(
+        session=session, semaphore=semaphore, name="jquery"
+    )
+
+    assert "3.7.0" in versions
+    assert len(versions) > 10
+
+
+@pytest.mark.parametrize("provider", (Provider.CDNJS, Provider.UNPKG))
+async def test_dependency_provider_get_assets(session, semaphore, provider):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    assets = await dependency_provider.get_assets(
+        session=session, semaphore=semaphore, name="jquery", version="3.7.0"
+    )
+
+    assert len(assets) > 5
+
+
+@pytest.mark.parametrize(
+    "provider,prefix", ((Provider.CDNJS, ""), (Provider.UNPKG, "dist/"))
+)
+async def test_dependency_provider_fetch_file(
+    session, semaphore, provider, prefix
+):
+    dependency_provider = get_dependency_provider(provider=provider)
+
+    content = await dependency_provider.fetch_file(
+        session=session,
+        semaphore=semaphore,
+        name=f"{prefix}jquery.min.js",
+        dependency_name="jquery",
+        dependency_version="3.7.0",
+    )
+
+    assert content.decode().startswith("/*! jQuery v3.7.0 |")

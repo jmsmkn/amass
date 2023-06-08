@@ -13,6 +13,7 @@ from warnings import warn
 
 import aiohttp
 import tomlkit
+from bs4 import BeautifulSoup
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
@@ -33,10 +34,9 @@ class DependencyProvider(ABC):
     ) -> Iterable[str]:
         ...
 
-    @classmethod
+    @staticmethod
     @abstractmethod
     async def get_assets(
-        cls,
         *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
@@ -76,9 +76,8 @@ class CDNJSDependencyProvider(DependencyProvider):
 
         return versions
 
-    @classmethod
+    @staticmethod
     async def get_assets(
-        cls,
         *,
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
@@ -114,11 +113,96 @@ class CDNJSDependencyProvider(DependencyProvider):
         return content
 
 
+class UNPKGDependencyProvider(DependencyProvider):
+    @staticmethod
+    async def get_versions(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+    ) -> Iterable[str]:
+        async with semaphore:
+            async with session.get(
+                f"https://unpkg.com/browse/{name}/",
+                allow_redirects=True,
+            ) as response:
+                page = await response.text()
+
+        # Unpkg does not provide a versions API, so parse out the html response
+        soup = BeautifulSoup(page, "html.parser")
+
+        scripts = soup.find_all("script")
+        prefix = "window.__DATA__ = "
+
+        for script in scripts:
+            if script.text.startswith(prefix):
+                metadata = script.text.replace(prefix, "")
+                versions: Iterable[str] = json.loads(metadata)[
+                    "availableVersions"
+                ]
+                break
+        else:
+            raise RuntimeError("Window data not found")
+
+        return versions
+
+    @staticmethod
+    async def get_assets(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        version: Version,
+    ) -> Iterable["AssetFile"]:
+        async with semaphore:
+            async with session.get(
+                f"https://unpkg.com/{name}@{version}/?meta"
+            ) as response:
+                metadata = await response.json()
+
+        assets = []
+
+        def append_assets(data: Dict[str, Any]) -> None:
+            for file in data["files"]:
+                if file["type"] == "file":
+                    assets.append(
+                        AssetFile(
+                            name=file["path"].lstrip("/"),
+                            sri=file["integrity"],
+                        )
+                    )
+                elif file["type"] == "directory":
+                    append_assets(file)
+                else:
+                    raise RuntimeError(f"Unknown type: {file['type']}")
+
+        append_assets(metadata)
+
+        return assets
+
+    @staticmethod
+    async def fetch_file(
+        *,
+        session: aiohttp.ClientSession,
+        semaphore: asyncio.Semaphore,
+        name: str,
+        dependency_name: str,
+        dependency_version: Version,
+    ) -> bytes:
+        async with semaphore:
+            async with session.get(
+                f"https://unpkg.com/{dependency_name}@{dependency_version}/{name}"
+            ) as request:
+                content: bytes = await request.read()
+
+        return content
+
+
 def get_dependency_provider(*, provider: Provider) -> Type[DependencyProvider]:
     if provider == Provider.CDNJS:
         return CDNJSDependencyProvider
     elif provider == Provider.UNPKG:
-        raise NotImplementedError
+        return UNPKGDependencyProvider
     else:
         raise RuntimeError(f"Invalid provider: {provider}")
 

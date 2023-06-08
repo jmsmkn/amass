@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "amass"
-version = "0.2.0"
+version = "0.3.0"
 description = "Vendor libraries from cdnjs"
 authors = ["James Meakin <amass@jmsmkn.com>"]
 license = "Apache-2.0"
@@ -20,6 +20,7 @@ click = "*"
 aiohttp = "*"
 packaging = "*"
 tomlkit = "*"
+beautifulsoup4 = "^4.12.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "*"
