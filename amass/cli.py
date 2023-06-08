@@ -75,7 +75,6 @@ async def lock() -> None:
 )
 @coroutine
 async def install() -> None:
-
     with open("amass.lock") as f:
         content = json.loads(f.read())
 
