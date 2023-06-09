@@ -11,9 +11,7 @@ import click
 import tomlkit
 from pkg_resources import get_distribution
 
-from amass import generate_lock_file, parse_dependencies, parse_lock_file
-
-CONCURRENT_REQUESTS = 5
+from amass import parse_lock_file, parse_toml_file, CONCURRENT_REQUESTS
 
 
 def coroutine(f: Callable[..., Any]) -> Callable[..., Any]:
@@ -49,21 +47,7 @@ async def lock() -> None:
     with open("pyproject.toml") as f:
         content = f.read()
 
-    document = tomlkit.parse(content)
-
-    dependencies = parse_dependencies(
-        dependencies=document["tool"]["amass"]["dependencies"]
-    )
-
-    semaphore = asyncio.Semaphore(value=CONCURRENT_REQUESTS)
-    async with aiohttp.ClientSession() as session:
-        tasks = [
-            dependency.update_assets(session=session, semaphore=semaphore)
-            for dependency in dependencies
-        ]
-        await asyncio.gather(*tasks)
-
-    lock_file = generate_lock_file(dependencies=dependencies)
+    lock_file = await parse_toml_file(content=content)
 
     with open("amass.lock", "w") as f:
         f.write(json.dumps(lock_file.content, indent=2))
@@ -93,6 +77,7 @@ async def install() -> None:
             )
 
         lock_file.check_integrity(directory=tmp_path)
+        lock_file.create_maps(directory=tmp_path)
 
         output_dir = _get_settings()["output_dir"]
         if output_dir.exists():

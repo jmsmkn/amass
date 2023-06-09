@@ -8,7 +8,7 @@ from base64 import b64encode
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type, Union
+from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type, Union, List
 from warnings import warn
 
 import aiohttp
@@ -266,6 +266,7 @@ class LockedDependency:
     version: str
     provider: Provider
     assets: Iterable[AssetFile]
+    maps: List[str]
 
     def __post_init__(self) -> None:
         # Handle nested serializer
@@ -343,6 +344,12 @@ class LockFile:
         if generated_files != found_files:
             raise RuntimeError("Sets of files do not match")
 
+    def create_maps(self, *, directory: Path) -> None:
+        for dependency in self.dependencies:
+            for map in dependency.maps:
+                file = directory / dependency.name / map
+                file.parent.mkdir(exist_ok=True, parents=True)
+                file.touch(exist_ok=False)
 
 @dataclass
 class Dependency:
@@ -352,6 +359,7 @@ class Dependency:
     include_filter: Optional[Set[Pattern[str]]] = None
     resolved_version: Optional[Version] = None
     assets: Optional[Iterable[AssetFile]] = None
+    maps: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
         if self.include_filter is not None:
@@ -376,6 +384,7 @@ class Dependency:
             version=str(self.resolved_version),
             provider=self.provider,
             assets=self.assets,
+            maps=[] if self.maps is None else self.maps,
         )
 
     async def update_assets(
@@ -435,7 +444,7 @@ def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
     )
 
     if lock_file.content != content:
-        raise ValueError("Lock files do not match")
+        raise ValueError(f"Lock files do not match: {lock_file.content['content_hash']}")
 
     return lock_file
 
@@ -443,6 +452,24 @@ def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
 def generate_lock_file(*, dependencies: Iterable[Dependency]) -> LockFile:
     return LockFile(dependencies=[d.locked for d in dependencies])
 
+async def parse_toml_file(*, content: str) -> LockFile:
+    document = tomlkit.parse(content)
+
+    dependencies = parse_dependencies(
+        dependencies=document["tool"]["amass"]["dependencies"]
+    )
+
+    semaphore = asyncio.Semaphore(value=CONCURRENT_REQUESTS)
+    async with aiohttp.ClientSession() as session:
+        tasks = [
+            dependency.update_assets(session=session, semaphore=semaphore)
+            for dependency in dependencies
+        ]
+        await asyncio.gather(*tasks)
+
+    lock_file = generate_lock_file(dependencies=dependencies)
+
+    return lock_file
 
 def parse_dependencies(
     *, dependencies: tomlkit.items.Table
@@ -464,13 +491,19 @@ def parse_dependencies(
 
         provider = meta.get("provider", "cdnjs")
 
+        maps = list(meta.get("maps", []))
+
         parsed.append(
             Dependency(
                 name=name,
                 specifiers=SpecifierSet(version),
                 include_filter=include_filter,
                 provider=Provider[provider.upper()],
+                maps=maps,
             )
         )
 
     return parsed
+
+
+CONCURRENT_REQUESTS = 5

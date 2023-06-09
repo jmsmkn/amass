@@ -19,9 +19,9 @@ from amass import (
     generate_lock_file,
     get_dependency_provider,
     parse_dependencies,
-    parse_lock_file,
+    parse_lock_file, CONCURRENT_REQUESTS, parse_toml_file,
 )
-from amass.cli import CONCURRENT_REQUESTS, cli
+from amass.cli import cli
 
 TEST_VERSIONS = [
     "0.0.8",
@@ -51,7 +51,7 @@ TEST_VERSIONS = [
 ]
 TEST_LOCK_FILE = {
     "content_hash": (
-        "sha256:ad85f173abc4da1023762546637c542ad6c23ef14edf0ecdfb8751d589db9279"
+        "sha256:8d25d01d0adc9808db2afd9feb489abc10c52008039293ecc1ee39d0e31cae8b"
     ),
     "dependencies": [
         {
@@ -66,10 +66,16 @@ TEST_LOCK_FILE = {
             "name": "htmx",
             "version": "1.7.0",
             "provider": "cdnjs",
+            "maps": [],
         }
     ],
     "lock_version": "1.0",
 }
+
+TEST_TOML_FILE = """
+[tool.amass.dependencies]
+vega = { version = "==5.20.2", include = ["vega(.min)?.js(.map)?"], maps = ["vega.min.js.map"] }
+"""
 
 
 def test_cli():
@@ -77,6 +83,9 @@ def test_cli():
     result = runner.invoke(cli)
     assert result.output != ""
 
+async def test_toml_file_parsing():
+    lock_file = await parse_toml_file(content=TEST_TOML_FILE)
+    assert lock_file.content
 
 @pytest_asyncio.fixture
 async def session():
@@ -130,7 +139,7 @@ def test_dependency_to_lock_entry():
         provider=Provider.CDNJS,
     )
     assert dependency.locked == LockedDependency(
-        name="foo", version="1.7.0", assets=[], provider=Provider.CDNJS
+        name="foo", version="1.7.0", assets=[], provider=Provider.CDNJS, maps=[]
     )
 
 
@@ -138,14 +147,14 @@ def test_lock_file_content():
     lock_file = LockFile(
         dependencies=[
             LockedDependency(
-                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS, maps=["foo"],
             )
         ]
     )
     assert lock_file.content == {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
+            "sha256:d0a4f142b8acbe104affa7e4294069d32b6999a41ddca420e8b0006ccaf1a2a1"
         ),
         "dependencies": [
             {
@@ -153,6 +162,7 @@ def test_lock_file_content():
                 "version": "3.6.0",
                 "assets": [],
                 "provider": "cdnjs",
+                "maps": ["foo"],
             }
         ],
     }
@@ -162,7 +172,7 @@ def test_parse_lock_file():
     content = {
         "lock_version": "1.0",
         "content_hash": (
-            "sha256:6fb6e863aa6e3358295c0fe699e63222134eff1e65c025763e3f7599e72e737f"
+            "sha256:4b42e84b4366f09c9bf04c533f9370ff31758542d6b785a57758982baf5a6e95"
         ),
         "dependencies": [
             {
@@ -170,6 +180,7 @@ def test_parse_lock_file():
                 "version": "3.6.0",
                 "assets": [],
                 "provider": "cdnjs",
+                "maps": ["foo.map"],
             }
         ],
     }
@@ -177,7 +188,7 @@ def test_parse_lock_file():
     assert parse_lock_file(content=content) == LockFile(
         dependencies=[
             LockedDependency(
-                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS
+                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS, maps=["foo.map"]
             )
         ]
     )
@@ -260,6 +271,7 @@ def test_parse_dependencies(provider_string, expected_provider):
             provider=expected_provider,
             specifiers=SpecifierSet("==1.7.0"),
             include_filter={"htmx.min.js"},
+            maps=[],
         )
     ]
 
