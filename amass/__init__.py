@@ -8,7 +8,17 @@ from base64 import b64encode
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Pattern, Set, Type, Union, List
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Pattern,
+    Set,
+    Type,
+    Union,
+)
 from warnings import warn
 
 import aiohttp
@@ -351,6 +361,7 @@ class LockFile:
                 file.parent.mkdir(exist_ok=True, parents=True)
                 file.touch(exist_ok=False)
 
+
 @dataclass
 class Dependency:
     name: str
@@ -444,13 +455,16 @@ def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
     )
 
     if lock_file.content != content:
-        raise ValueError(f"Lock files do not match: {lock_file.content['content_hash']}")
+        raise ValueError(
+            f"Lock files do not match: {lock_file.content['content_hash']}"
+        )
 
     return lock_file
 
 
 def generate_lock_file(*, dependencies: Iterable[Dependency]) -> LockFile:
     return LockFile(dependencies=[d.locked for d in dependencies])
+
 
 async def parse_toml_file(*, content: str) -> LockFile:
     document = tomlkit.parse(content)
@@ -470,6 +484,7 @@ async def parse_toml_file(*, content: str) -> LockFile:
     lock_file = generate_lock_file(dependencies=dependencies)
 
     return lock_file
+
 
 def parse_dependencies(
     *, dependencies: tomlkit.items.Table

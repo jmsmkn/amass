@@ -11,7 +11,7 @@ import click
 import tomlkit
 from pkg_resources import get_distribution
 
-from amass import parse_lock_file, parse_toml_file, CONCURRENT_REQUESTS
+from amass import CONCURRENT_REQUESTS, parse_lock_file, parse_toml_file
 
 
 def coroutine(f: Callable[..., Any]) -> Callable[..., Any]:

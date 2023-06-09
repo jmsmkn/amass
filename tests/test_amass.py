@@ -11,6 +11,7 @@ from packaging.specifiers import SpecifierSet
 from packaging.version import Version
 
 from amass import (
+    CONCURRENT_REQUESTS,
     AssetFile,
     Dependency,
     LockedDependency,
@@ -19,7 +20,8 @@ from amass import (
     generate_lock_file,
     get_dependency_provider,
     parse_dependencies,
-    parse_lock_file, CONCURRENT_REQUESTS, parse_toml_file,
+    parse_lock_file,
+    parse_toml_file,
 )
 from amass.cli import cli
 
@@ -74,7 +76,7 @@ TEST_LOCK_FILE = {
 
 TEST_TOML_FILE = """
 [tool.amass.dependencies]
-vega = { version = "==5.20.2", include = ["vega(.min)?.js(.map)?"], maps = ["vega.min.js.map"] }
+vega = { version = "==5.20.2", include = ["vega(.min)?.js"], maps = ["vega.map"] }
 """
 
 
@@ -83,9 +85,11 @@ def test_cli():
     result = runner.invoke(cli)
     assert result.output != ""
 
+
 async def test_toml_file_parsing():
     lock_file = await parse_toml_file(content=TEST_TOML_FILE)
     assert lock_file.content
+
 
 @pytest_asyncio.fixture
 async def session():
@@ -139,7 +143,11 @@ def test_dependency_to_lock_entry():
         provider=Provider.CDNJS,
     )
     assert dependency.locked == LockedDependency(
-        name="foo", version="1.7.0", assets=[], provider=Provider.CDNJS, maps=[]
+        name="foo",
+        version="1.7.0",
+        assets=[],
+        provider=Provider.CDNJS,
+        maps=[],
     )
 
 
@@ -147,7 +155,11 @@ def test_lock_file_content():
     lock_file = LockFile(
         dependencies=[
             LockedDependency(
-                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS, maps=["foo"],
+                name="foo",
+                version="3.6.0",
+                assets=[],
+                provider=Provider.CDNJS,
+                maps=["foo"],
             )
         ]
     )
@@ -188,7 +200,11 @@ def test_parse_lock_file():
     assert parse_lock_file(content=content) == LockFile(
         dependencies=[
             LockedDependency(
-                name="foo", version="3.6.0", assets=[], provider=Provider.CDNJS, maps=["foo.map"]
+                name="foo",
+                version="3.6.0",
+                assets=[],
+                provider=Provider.CDNJS,
+                maps=["foo.map"],
             )
         ]
     )
