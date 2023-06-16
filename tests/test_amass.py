@@ -8,7 +8,6 @@ import pytest_asyncio
 import tomlkit
 from click.testing import CliRunner
 from packaging.specifiers import SpecifierSet
-from packaging.version import Version
 
 from amass import (
     CONCURRENT_REQUESTS,
@@ -17,6 +16,7 @@ from amass import (
     LockedDependency,
     LockFile,
     Provider,
+    ProviderVersion,
     generate_lock_file,
     get_dependency_provider,
     parse_dependencies,
@@ -115,7 +115,7 @@ async def test_update_all_assets(session, semaphore):
         session=session,
         semaphore=semaphore,
     )
-    assert dependency.resolved_version == Version("1.7.0")
+    assert dependency.resolved_version == "1.7.0"
     assert dependency.assets == [
         AssetFile(
             name="htmx.js",
@@ -130,15 +130,18 @@ async def test_update_all_assets(session, semaphore):
 
 def test_resolve_dependency():
     dependency = Dependency(name="foo", provider=Provider.CDNJS)
-    assert dependency.resolve_version(
-        versions={Version(v) for v in TEST_VERSIONS}
-    ) == Version("1.7.0")
+    assert (
+        dependency.resolve_version(
+            versions={ProviderVersion(remote_version=v) for v in TEST_VERSIONS}
+        )
+        == "1.7.0"
+    )
 
 
 def test_dependency_to_lock_entry():
     dependency = Dependency(
         name="foo",
-        resolved_version=Version("1.7.0"),
+        resolved_version="1.7.0",
         assets=[],
         provider=Provider.CDNJS,
     )
@@ -290,6 +293,18 @@ def test_parse_dependencies(provider_string, expected_provider):
             maps=[],
         )
     ]
+
+
+async def test_resolve_beta_version(session, semaphore):
+    dependency = Dependency(
+        name="itk-wasm",
+        specifiers=SpecifierSet("==1.0.0-b.18"),
+        provider=Provider.UNPKG,
+    )
+
+    await dependency.update_assets(session=session, semaphore=semaphore)
+
+    assert dependency.resolved_version == "1.0.0-b.18"
 
 
 @pytest.mark.parametrize("provider", (Provider.CDNJS, Provider.UNPKG))

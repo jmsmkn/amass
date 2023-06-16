@@ -218,7 +218,22 @@ def get_dependency_provider(*, provider: Provider) -> Type[DependencyProvider]:
         raise RuntimeError(f"Invalid provider: {provider}")
 
 
-@dataclass
+@dataclass(frozen=True)
+class ProviderVersion:
+    remote_version: str
+
+    def __post_init__(self) -> None:
+        try:
+            _ = self.parsed_version
+        except InvalidVersion:
+            raise
+
+    @property
+    def parsed_version(self) -> Version:
+        return Version(self.remote_version)
+
+
+@dataclass(frozen=True)
 class AssetFile:
     name: str
     sri: Optional[str] = None
@@ -270,7 +285,7 @@ class AssetFile:
             f.write(content)
 
 
-@dataclass
+@dataclass()
 class LockedDependency:
     name: str
     version: str
@@ -289,7 +304,7 @@ class LockedDependency:
         self.assets = sorted(assets, key=lambda a: a.name)
 
 
-@dataclass
+@dataclass(frozen=True)
 class LockFile:
     dependencies: Iterable[LockedDependency]
 
@@ -368,7 +383,7 @@ class Dependency:
     provider: Provider
     specifiers: SpecifierSet = SpecifierSet("")
     include_filter: Optional[Set[Pattern[str]]] = None
-    resolved_version: Optional[Version] = None
+    resolved_version: Optional[str] = None
     assets: Optional[Iterable[AssetFile]] = None
     maps: Optional[List[str]] = None
 
@@ -376,11 +391,21 @@ class Dependency:
         if self.include_filter is not None:
             self.include_filter = {re.compile(f) for f in self.include_filter}
 
-    def resolve_version(self, *, versions: Set[Version]) -> Version:
+    def resolve_version(self, *, versions: Set[ProviderVersion]) -> str:
         if not versions:
             raise RuntimeError(f"No assets found for {self.name}")
 
-        return max(self.specifiers.filter(iterable=versions))
+        desired_version = max(
+            self.specifiers.filter(
+                iterable=(v.parsed_version for v in versions)
+            )
+        )
+
+        for v in versions:
+            if v.parsed_version == desired_version:
+                return v.remote_version
+
+        raise RuntimeError(f"Version not determined for {self.name}")
 
     @property
     def locked(self) -> LockedDependency:
@@ -392,7 +417,7 @@ class Dependency:
 
         return LockedDependency(
             name=self.name,
-            version=str(self.resolved_version),
+            version=self.resolved_version,
             provider=self.provider,
             assets=self.assets,
             maps=[] if self.maps is None else self.maps,
@@ -409,18 +434,20 @@ class Dependency:
 
     async def _find_versions(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
-    ) -> Set[Version]:
-        version_strs = await get_dependency_provider(
+    ) -> Set[ProviderVersion]:
+        remote_versions = await get_dependency_provider(
             provider=self.provider
         ).get_versions(session=session, semaphore=semaphore, name=self.name)
 
         versions = set()
 
-        for version_str in version_strs:
+        for remote_version in remote_versions:
             try:
-                version = Version(version_str)
+                version = ProviderVersion(remote_version=remote_version)
             except InvalidVersion:
-                warn(f"Skipping invalid version {version_str} for {self.name}")
+                warn(
+                    f"Skipping invalid version {remote_version} for {self.name}"
+                )
                 continue
 
             versions.add(version)
