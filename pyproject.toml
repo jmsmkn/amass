@@ -2,7 +2,7 @@
 name = "amass"
 version = "0.3.3"
 description = "Vendor libraries from cdnjs"
-authors = ["James Meakin <amass@jmsmkn.com>"]
+authors = ["James Meakin"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jmsmkn/amass"
