@@ -10,7 +10,6 @@ dependencies = [
     "packaging",
     "tomlkit",
     "beautifulsoup4",
-    "setuptools",
 ]
 name = "amass"
 version = "0.4.0"

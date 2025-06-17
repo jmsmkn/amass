@@ -2,6 +2,7 @@ import asyncio
 import json
 import shutil
 from functools import wraps
+from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable
@@ -9,7 +10,6 @@ from typing import Any, Callable
 import aiohttp
 import click
 import tomlkit
-from pkg_resources import get_distribution
 
 from amass import CONCURRENT_REQUESTS, parse_lock_file, parse_toml_file
 
@@ -36,7 +36,7 @@ def _get_settings() -> dict[str, Path]:
 
 
 @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
-@click.version_option(get_distribution("amass").version, "-v", "--version")
+@click.version_option(version("amass"), "-v", "--version")
 def cli() -> None:
     pass
 
