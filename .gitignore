@@ -135,3 +135,5 @@ poetry.lock
 amass.lock
 
 .idea/
+
+uv.lock
