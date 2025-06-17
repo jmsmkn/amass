@@ -10,6 +10,7 @@ dependencies = [
     "packaging",
     "tomlkit",
     "beautifulsoup4",
+    "setuptools",
 ]
 name = "amass"
 version = "0.4.0"
@@ -71,13 +72,10 @@ python =
     3.10: py310
     3.11: py311
 [testenv]
-allowlist_externals =
-    uv
-setenv =
-    PYTHONPATH = {toxinidir}
+dependency_groups =
+    dev
 commands =
-    uv sync
-    uv run pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
+    {envpython} -m pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
 """
 
 [tool.uv]
