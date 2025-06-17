@@ -124,6 +124,19 @@ class CDNJSDependencyProvider(DependencyProvider):
         return content
 
 
+UNPKG_ALLOWED_ASSET_TYPES = {
+    "text/html",
+    "text/javascript",
+    "text/markdown",
+    "text/plain",
+    "text/typescript",
+    "text/yaml",
+    "application/json",
+    "application/octet-stream",
+    "application/toml",
+}
+
+
 class UNPKGDependencyProvider(DependencyProvider):
     @staticmethod
     async def get_versions(
@@ -134,27 +147,20 @@ class UNPKGDependencyProvider(DependencyProvider):
     ) -> Iterable[str]:
         async with semaphore:
             async with session.get(
-                f"https://unpkg.com/browse/{name}/",
+                f"https://app.unpkg.com/{name}",
                 allow_redirects=True,
             ) as response:
                 page = await response.text()
 
         # Unpkg does not provide a versions API, so parse out the html response
         soup = BeautifulSoup(page, "html.parser")
-
-        scripts = soup.find_all("script")
-        prefix = "window.__DATA__ = "
-
-        for script in scripts:
-            if script.text.startswith(prefix):
-                metadata = script.text.replace(prefix, "")
-                versions: Iterable[str] = json.loads(metadata)[
-                    "availableVersions"
-                ]
-                break
-        else:
-            raise RuntimeError("Window data not found")
-
+        versions = []
+        optgroup = soup.find("optgroup", {"label": "Versions"})
+        if optgroup:
+            for option in optgroup.find_all("option"):
+                value = option.get("value")
+                if value:
+                    versions.append(value)
         return versions
 
     @staticmethod
@@ -175,7 +181,7 @@ class UNPKGDependencyProvider(DependencyProvider):
 
         def append_assets(data: Dict[str, Any]) -> None:
             for file in data["files"]:
-                if file["type"] == "file":
+                if file["type"] in UNPKG_ALLOWED_ASSET_TYPES:
                     assets.append(
                         AssetFile(
                             name=file["path"].lstrip("/"),
