@@ -164,11 +164,23 @@ class UNPKGDependencyProvider(DependencyProvider):
             ) as response:
                 metadata = await response.json()
 
+        ALLOWED_ASSET_TYPES = {
+            "text/html",
+            "text/javascript",
+            "text/markdown",
+            "text/plain",
+            "text/typescript",
+            "text/yaml",
+            "application/json",
+            "application/octet-stream",
+            "application/toml",
+        }
+
         assets = []
 
         def append_assets(data: Dict[str, Any]) -> None:
             for file in data["files"]:
-                if file["type"] == "file":
+                if file["type"] in ALLOWED_ASSET_TYPES:
                     assets.append(
                         AssetFile(
                             name=file["path"].lstrip("/"),
