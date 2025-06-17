@@ -1,42 +1,44 @@
-[tool.poetry]
+[project]
+authors = [
+    {name = "James Meakin"},
+]
+license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+dependencies = [
+    "click",
+    "aiohttp",
+    "packaging",
+    "tomlkit",
+    "beautifulsoup4",
+]
 name = "amass"
-version = "0.3.3"
+version = "0.4.0"
 description = "Vendor libraries from cdnjs"
-authors = ["James Meakin"]
-license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/jmsmkn/amass"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
 ]
 
-[tool.poetry.scripts]
+[project.urls]
+repository = "https://github.com/jmsmkn/amass"
+
+[project.scripts]
 amass = "amass.cli:cli"
 
-[tool.poetry.dependencies]
-python = ">=3.8"
-click = "*"
-aiohttp = "*"
-packaging = "*"
-tomlkit = "*"
-beautifulsoup4 = "*"
-
-[tool.poetry.dev-dependencies]
-pytest = "*"
-pytest-randomly = "*"
-pytest-cov = "*"
-pytest-asyncio = "*"
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-randomly",
+    "pytest-cov",
+    "pytest-asyncio",
+]
 
 [tool.amass]
 output = "test_output"
 
 [tool.amass.dependencies]
 openseadragon = { version = "==2.4.1", include = ["openseadragon.min.js", "openseadragon.js", "images/*"]}
-
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
 
 [tool.isort]
 profile = "black"
@@ -70,10 +72,13 @@ python =
     3.11: py311
 [testenv]
 allowlist_externals =
-    poetry
+    uv
 setenv =
     PYTHONPATH = {toxinidir}
 commands =
-    poetry install -v
-    poetry run pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
+    uv sync
+    uv run pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
 """
+
+[tool.uv]
+package = true
