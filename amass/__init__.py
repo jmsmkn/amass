@@ -134,27 +134,20 @@ class UNPKGDependencyProvider(DependencyProvider):
     ) -> Iterable[str]:
         async with semaphore:
             async with session.get(
-                f"https://unpkg.com/browse/{name}/",
+                f"https://app.unpkg.com/{name}",
                 allow_redirects=True,
             ) as response:
                 page = await response.text()
 
         # Unpkg does not provide a versions API, so parse out the html response
         soup = BeautifulSoup(page, "html.parser")
-
-        scripts = soup.find_all("script")
-        prefix = "window.__DATA__ = "
-
-        for script in scripts:
-            if script.text.startswith(prefix):
-                metadata = script.text.replace(prefix, "")
-                versions: Iterable[str] = json.loads(metadata)[
-                    "availableVersions"
-                ]
-                break
-        else:
-            raise RuntimeError("Window data not found")
-
+        versions = []
+        optgroup = soup.find("optgroup", {"label": "Versions"})
+        if optgroup:
+            for option in optgroup.find_all("option"):
+                value = option.get("value")
+                if value:
+                    versions.append(value)
         return versions
 
     @staticmethod
