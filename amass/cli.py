@@ -4,7 +4,7 @@ import shutil
 from functools import wraps
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 import aiohttp
 import click
@@ -22,7 +22,7 @@ def coroutine(f: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def _get_settings() -> Dict[str, Path]:
+def _get_settings() -> dict[str, Path]:
     with open("pyproject.toml") as f:
         content = f.read()
 

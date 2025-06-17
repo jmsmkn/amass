@@ -5,20 +5,12 @@ import json
 import re
 from abc import ABC, abstractmethod
 from base64 import b64encode
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Pattern,
-    Set,
-    Type,
-    Union,
-)
+from re import Pattern
+from typing import Any, Optional, Union
 from warnings import warn
 
 import aiohttp
@@ -43,7 +35,7 @@ class DependencyProvider(ABC):
         semaphore: asyncio.Semaphore,
         name: str,
     ) -> Iterable[str]:
-        ...
+        pass
 
     @staticmethod
     @abstractmethod
@@ -54,7 +46,7 @@ class DependencyProvider(ABC):
         name: str,
         version: Version,
     ) -> Iterable["AssetFile"]:
-        ...
+        pass
 
     @staticmethod
     @abstractmethod
@@ -66,7 +58,7 @@ class DependencyProvider(ABC):
         dependency_name: str,
         dependency_version: Version,
     ) -> bytes:
-        ...
+        pass
 
 
 class CDNJSDependencyProvider(DependencyProvider):
@@ -179,7 +171,7 @@ class UNPKGDependencyProvider(DependencyProvider):
 
         assets = []
 
-        def append_assets(data: Dict[str, Any]) -> None:
+        def append_assets(data: dict[str, Any]) -> None:
             for file in data["files"]:
                 if file["type"] in UNPKG_ALLOWED_ASSET_TYPES:
                     assets.append(
@@ -215,7 +207,7 @@ class UNPKGDependencyProvider(DependencyProvider):
         return content
 
 
-def get_dependency_provider(*, provider: Provider) -> Type[DependencyProvider]:
+def get_dependency_provider(*, provider: Provider) -> type[DependencyProvider]:
     if provider == Provider.CDNJS:
         return CDNJSDependencyProvider
     elif provider == Provider.UNPKG:
@@ -260,7 +252,7 @@ class AssetFile:
         session: aiohttp.ClientSession,
         semaphore: asyncio.Semaphore,
         output_dir: Path,
-        dependency_provider: Type[DependencyProvider],
+        dependency_provider: type[DependencyProvider],
         dependency_name: str,
         dependency_version: Union[Version, str],
     ) -> None:
@@ -297,7 +289,7 @@ class LockedDependency:
     version: str
     provider: Provider
     assets: Iterable[AssetFile]
-    maps: List[str]
+    maps: list[str]
 
     def __post_init__(self) -> None:
         # Handle nested serializer
@@ -315,14 +307,14 @@ class LockFile:
     dependencies: Iterable[LockedDependency]
 
     @property
-    def metadata(self) -> Dict[str, str]:
+    def metadata(self) -> dict[str, str]:
         return {
             "version": "1.0",
             "algorithm": "sha256",
         }
 
     @property
-    def content(self) -> Dict[str, Any]:
+    def content(self) -> dict[str, Any]:
         dependencies = [
             asdict(d) for d in sorted(self.dependencies, key=lambda d: d.name)
         ]
@@ -388,16 +380,16 @@ class Dependency:
     name: str
     provider: Provider
     specifiers: SpecifierSet = SpecifierSet("")
-    include_filter: Optional[Set[Pattern[str]]] = None
+    include_filter: Optional[set[Pattern[str]]] = None
     resolved_version: Optional[str] = None
     assets: Optional[Iterable[AssetFile]] = None
-    maps: Optional[List[str]] = None
+    maps: Optional[list[str]] = None
 
     def __post_init__(self) -> None:
         if self.include_filter is not None:
             self.include_filter = {re.compile(f) for f in self.include_filter}
 
-    def resolve_version(self, *, versions: Set[ProviderVersion]) -> str:
+    def resolve_version(self, *, versions: set[ProviderVersion]) -> str:
         if not versions:
             raise RuntimeError(f"No assets found for {self.name}")
 
@@ -440,7 +432,7 @@ class Dependency:
 
     async def _find_versions(
         self, *, session: aiohttp.ClientSession, semaphore: asyncio.Semaphore
-    ) -> Set[ProviderVersion]:
+    ) -> set[ProviderVersion]:
         remote_versions = await get_dependency_provider(
             provider=self.provider
         ).get_versions(session=session, semaphore=semaphore, name=self.name)
@@ -482,7 +474,7 @@ class Dependency:
         self.assets = assets
 
 
-def parse_lock_file(*, content: Dict[str, Any]) -> LockFile:
+def parse_lock_file(*, content: dict[str, Any]) -> LockFile:
     lock_file = LockFile(
         dependencies=[LockedDependency(**d) for d in content["dependencies"]]
     )
