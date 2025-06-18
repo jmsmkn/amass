@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import functools
 import hashlib
 import json
@@ -117,16 +118,18 @@ class CDNJSDependencyProvider(DependencyProvider):
 
 
 UNPKG_ALLOWED_ASSET_TYPES = {
-    "text/html",
-    "text/javascript",
-    "text/markdown",
-    "text/plain",
-    "text/typescript",
-    "text/yaml",
+    "text/*",
     "application/json",
     "application/octet-stream",
     "application/toml",
 }
+
+
+def is_allowed_asset_type(asset_type: str) -> bool:
+    for allowed in UNPKG_ALLOWED_ASSET_TYPES:
+        if fnmatch.fnmatch(asset_type, allowed):
+            return True
+    return False
 
 
 class UNPKGDependencyProvider(DependencyProvider):
@@ -173,7 +176,7 @@ class UNPKGDependencyProvider(DependencyProvider):
 
         def append_assets(data: dict[str, Any]) -> None:
             for file in data["files"]:
-                if file["type"] in UNPKG_ALLOWED_ASSET_TYPES:
+                if is_allowed_asset_type(file["type"]):
                     assets.append(
                         AssetFile(
                             name=file["path"].lstrip("/"),
