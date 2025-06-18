@@ -19,6 +19,7 @@ from amass import (
     ProviderVersion,
     generate_lock_file,
     get_dependency_provider,
+    is_allowed_asset_type,
     parse_dependencies,
     parse_lock_file,
     parse_toml_file,
@@ -347,3 +348,8 @@ async def test_dependency_provider_fetch_file(
     )
 
     assert content.decode().startswith("/*! jQuery v3.7.0 |")
+
+
+def test_is_allowed_asset_type_text_test():
+    assert is_allowed_asset_type("text/anything")
+    assert not is_allowed_asset_type("application/anything")
