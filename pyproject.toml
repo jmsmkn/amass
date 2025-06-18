@@ -12,7 +12,7 @@ dependencies = [
     "beautifulsoup4",
 ]
 name = "amass"
-version = "0.4.0"
+version = "0.4.1"
 description = "Vendor libraries from cdnjs"
 readme = "README.md"
 classifiers = [
