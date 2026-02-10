@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from re import Pattern
-from typing import Any, Optional, Union
+from typing import Any
 from warnings import warn
 
 import aiohttp
@@ -237,7 +237,7 @@ class ProviderVersion:
 @dataclass(frozen=True)
 class AssetFile:
     name: str
-    sri: Optional[str] = None
+    sri: str | None = None
 
     def check_integrity(self, *, content: bytes) -> None:
         if self.sri is not None:
@@ -257,7 +257,7 @@ class AssetFile:
         output_dir: Path,
         dependency_provider: type[DependencyProvider],
         dependency_name: str,
-        dependency_version: Union[Version, str],
+        dependency_version: Version | str,
     ) -> None:
         content = await dependency_provider.fetch_file(
             session=session,
@@ -383,10 +383,10 @@ class Dependency:
     name: str
     provider: Provider
     specifiers: SpecifierSet = SpecifierSet("")
-    include_filter: Optional[set[Pattern[str]]] = None
-    resolved_version: Optional[str] = None
-    assets: Optional[Iterable[AssetFile]] = None
-    maps: Optional[list[str]] = None
+    include_filter: set[Pattern[str]] | None = None
+    resolved_version: str | None = None
+    assets: Iterable[AssetFile] | None = None
+    maps: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.include_filter is not None:

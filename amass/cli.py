@@ -1,11 +1,12 @@
 import asyncio
 import json
 import shutil
+from collections.abc import Callable
 from functools import wraps
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Callable
+from typing import Any
 
 import aiohttp
 import click

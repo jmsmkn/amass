@@ -3,7 +3,7 @@ authors = [
     {name = "James Meakin"},
 ]
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "click",
     "aiohttp",
@@ -32,6 +32,7 @@ dev = [
     "pytest-randomly",
     "pytest-cov",
     "pytest-asyncio",
+    "pre-commit",
 ]
 
 [tool.amass]
@@ -47,7 +48,7 @@ line_length = 79
 
 [tool.black]
 line-length = 79
-target-version = ['py39']
+target-version = ['py310']
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -58,25 +59,6 @@ testpaths = [
 python_files = "tests.py test_*.py *_tests.py"
 addopts = "--strict-markers --showlocals"
 xfail_strict = true
-
-[tool.tox]
-legacy_tox_ini = """
-[tox]
-isolated_build = True
-envlist = py39, py310, py311, py312, py313
-[gh-actions]
-python =
-    3.9: py39
-    3.10: py310
-    3.11: py311
-    3.12: py312
-    3.13: py313
-[testenv]
-dependency_groups =
-    dev
-commands =
-    {envpython} -m pytest --cov-branch --cov-report term-missing --cov=tests/ --cov=amass/ --basetemp={envtmpdir} {posargs}
-"""
 
 [tool.uv]
 package = true
