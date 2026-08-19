@@ -85,4 +85,4 @@ async def install() -> None:
             shutil.rmtree(output_dir)
 
         output_dir.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path.rename(output_dir)
+        shutil.move(str(tmp_path), str(output_dir))
