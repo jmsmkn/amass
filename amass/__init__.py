@@ -9,6 +9,7 @@ from base64 import b64encode
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
+from html.parser import HTMLParser
 from pathlib import Path
 from re import Pattern
 from typing import Any
@@ -16,7 +17,6 @@ from warnings import warn
 
 import aiohttp
 import tomlkit
-from html.parser import HTMLParser
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
