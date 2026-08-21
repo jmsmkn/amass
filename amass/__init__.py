@@ -9,6 +9,7 @@ from base64 import b64encode
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
+from html.parser import HTMLParser
 from pathlib import Path
 from re import Pattern
 from typing import Any
@@ -16,7 +17,6 @@ from warnings import warn
 
 import aiohttp
 import tomlkit
-from bs4 import BeautifulSoup
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
@@ -132,6 +132,28 @@ def is_allowed_asset_type(asset_type: str) -> bool:
     return False
 
 
+class _UnpkgVersionParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._in_versions_group = False
+        self.versions: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        attr_dict = dict(attrs)
+        if tag == "optgroup" and attr_dict.get("label") == "Versions":
+            self._in_versions_group = True
+        elif tag == "option" and self._in_versions_group:
+            value = attr_dict.get("value")
+            if value:
+                self.versions.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "optgroup":
+            self._in_versions_group = False
+
+
 class UNPKGDependencyProvider(DependencyProvider):
     @staticmethod
     async def get_versions(
@@ -148,15 +170,9 @@ class UNPKGDependencyProvider(DependencyProvider):
                 page = await response.text()
 
         # Unpkg does not provide a versions API, so parse out the html response
-        soup = BeautifulSoup(page, "html.parser")
-        versions = []
-        optgroup = soup.find("optgroup", {"label": "Versions"})
-        if optgroup:
-            for option in optgroup.find_all("option"):
-                value = option.get("value")
-                if value:
-                    versions.append(value)
-        return versions
+        parser = _UnpkgVersionParser()
+        parser.feed(page)
+        return parser.versions
 
     @staticmethod
     async def get_assets(

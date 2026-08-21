@@ -9,10 +9,9 @@ dependencies = [
     "aiohttp",
     "packaging",
     "tomlkit",
-    "beautifulsoup4",
 ]
 name = "amass"
-version = "0.4.2"
+version = "0.4.3"
 description = "Vendor libraries from cdnjs"
 readme = "README.md"
 classifiers = [
